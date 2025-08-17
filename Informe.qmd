@@ -1,0 +1,175 @@
+---
+title: "Análisis estadístico de la base de datos de World Ranking Universities 2025"
+author: "David Villegas Ceballos"
+lang: es
+theme: lux
+format: html
+toc: true
+toc-location: left
+number-selections: true
+editor: visual
+---
+
+## Limpieza de base de datos
+
+#### Librerias a usar
+
+```{r}
+library(tidyverse)
+library(readxl)
+```
+
+```{r include = FALSE}
+knitr:: opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(readxl)
+df <- read_excel("C:/Users/davil/Desktop/World-University-Rankings-2025/World University Rankings 2025.xlsx")
+```
+
+#### Inpeccion de la base de datos
+
+Encontramos que todas nuestras variables son categoricas, tenemos 2826 filas y 11 columnas.
+
+```{r}
+str(df)
+```
+
+#### Renombramos nuestras variables
+
+```{r}
+df <- df %>%
+  rename(Rank = `Rank`, 
+         University = `University Name`,
+         Country = `CountryRegion`,
+         Overall = `Overall`,
+         Teaching = `Teaching`,
+         Research_Environment = `Research_Environment`, 
+         Research_Quality = `Research_Quality`,  
+         Industry = `Industry`,
+         International_Outlook = `International_Outlook`,
+         About_university= `About_university`,
+         About_university2= `About_university2`)
+colnames(df)
+```
+
+#### Operaciones de limpieza
+
+Con el objetivo de preparar la base de datos para el análisis estadístico, se aplicaron varias acciones de limpieza. Primero, se eliminaron todas las filas que no contenían el nombre de la universidad o cuyo ranking era "Reporter", ya que no aportan valor al análisis. A continuación, se estandarizó la columna Rank eliminando los caracteres especiales como + y =. Finalmente, se descartaron las columnas About_university 1 y 2 por no ser relevantes para un análisis cuantitativo. Este proceso garantiza un conjunto de datos limpio y consistente para los siguientes pasos.
+
+```{r}
+datos <- df %>%
+  filter(!is.na(University)) %>% #Filtramos los datos que no tengan nulos en la columna University
+  filter(Rank != "Reporter") %>% #Filtramos los datos para que todos los Reporter desaparezcan
+  
+  select(-c(About_university,About_university2)) %>% #Eliminamos las columnas "About_university"
+  
+  mutate(Rank = str_replace(Rank, "=","")) %>% #Eliminamos el =
+  mutate(Rank = str_replace(Rank, "\\+", ""))  #Eliminamos el +
+glimpse(datos)
+```
+
+Las columnas Rank y Overall presentaban un formato mixto de texto, incluyendo tanto números individuales como rangos (ej: "55.1–58.2"), lo que impedía su uso en análisis estadísticos. Para solucionar esto, se transformaron todos los valores a un formato numérico. Los rangos fueron reemplazados por su punto medio, mientras que los números únicos se mantuvieron. Como resultado, ambas columnas ahora contienen datos puramente numéricos, listos para ser analizados.
+
+```{r}
+datos <- datos %>%
+  separate(Rank, c("MinRank", "MaxRank"), sep = "–", remove = F)  %>% #Separo Rank en Min y Max
+  separate(Overall, c("MinOverall", "MaxOverall"), sep = "–", remove = F)
+
+datos$MinRank <- as.numeric(datos$MinRank) #Los convierto en numericos
+datos$MaxRank <- as.numeric(datos$MaxRank)
+
+datos$MinOverall <- as.numeric(datos$MinOverall) 
+datos$MaxOverall <- as.numeric(datos$MaxOverall)
+
+
+datos <- datos %>%
+  mutate(Rank= if_else(is.na(MaxRank), MinRank, (MaxRank+MinRank)/2)) %>% #Aplico un if para dejar el Min o hacer promedio
+  select(-c(MinRank, MaxRank)) %>% #Elimino las columnas una vez usadas
+  
+  mutate(Overall= if_else(is.na(MaxOverall), MinOverall, (MaxOverall+MinOverall)/2)) %>%
+  select(-c(MinOverall, MaxOverall))
+glimpse(datos)
+```
+
+##### Nota Adicional sobre los Datos Excluidos
+
+> Durante el proceso de limpieza, se eliminaron las filas que no contenían información en las columnas de `University` o `Country`. Una investigación en la página web oficial de la clasificación permitió identificar el origen de estos registros.
+
+> Se constató que estas entradas corresponden a instituciones de la **Federación Rusa**. En la web oficial, estas universidades aparecen listadas pero visualmente diferenciadas (en un tono grisáceo), lo que indica que no forman parte del ranking principal. Si bien la fuente no especifica la razón de este tratamiento, se infiere que esta exclusión podría estar relacionada con el actual contexto geopolítico.
+
+#### Variables categoricas
+
+Tras la limpieza, se generaron dos nuevas variables categóricas, Rank_category y Overall_category, para facilitar el análisis por segmentos. La creación de Rank_category fue un paso fundamental, ya que el ranking numérico no es apto para cálculos directos. Por otro lado, la variable Overall_category se creó como un complemento a la columna Overall numérica, la cual se conserva para análisis cuantitativos precisos. Esto nos proporciona flexibilidad, permitiendo tanto comparaciones entre grupos de rendimiento como cálculos estadísticos detallados.
+
+```{r}
+datos <- datos%>%
+  mutate(Rank_category= case_when(
+    Rank <=10 ~ "Top 10",
+    Rank <=20 ~ "Top 20",
+    Rank <=30 ~ "Top 30",
+    Rank <=40 ~ "Top 40",
+    Rank <=50 ~ "Top 50",
+    Rank <=100 ~ "Top 100",
+    Rank <=500 ~ "Top 500",
+    Rank <=1000 ~ "Top 1000",
+    Rank <=1500 ~ "Top 1500",
+    Rank > 1500 ~ "Top 1500+"),
+    
+    Overall_category= case_when(
+      Overall >= 90 ~ "Élite (90+)",
+      Overall >= 80 ~ "Excelente (80-89.9)",
+      Overall >= 70 ~ "Alto (70-79.9)",
+      Overall >= 60 ~ "Bueno (60-69.9)",
+      Overall >= 50 ~ "Medio (50-59.9)",
+      Overall >= 40 ~ "Malo (40-49.9)",
+      Overall < 40 ~  "Muy bajo (40-)"))
+glimpse(datos)
+```
+
+#### Variables numericas
+
+```{r}
+datos$Teaching              <- as.numeric(datos$Teaching)
+datos$Research_Environment  <- as.numeric(datos$Research_Environment) 
+datos$Research_Quality      <- as.numeric(datos$Research_Quality)
+datos$Industry              <- as.numeric(datos$Industry)
+datos$International_Outlook <- as.numeric(datos$International_Outlook)
+
+numeric_cols <- select_if(datos, is.numeric)
+
+
+print(numeric_cols)
+
+```
+
+#### Variables
+
+| Variable              | Tipo         |
+|-----------------------|--------------|
+| Rank                  | Cuantitativa |
+| University            | Cualitativa  |
+| Country               | Cualitativa  |
+| Overall               | Cuantitativa |
+| Teaching              | Cuantitativa |
+| Research_Environment  | Cuantitativa |
+| Research_Quality      | Cuantitativa |
+| Industry              | Cuantitativa |
+| International_Outlook | Cuantitativa |
+| Rank_category         | Cualitativa  |
+| Overall_category      | Cualitativa  |
+
+## Análisis estadistico
+
+When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+
+```{r}
+1 + 1
+```
+
+You can add options to executable code like this
+
+```{r}
+#| echo: false
+2 * 2
+```
+
+The `echo: false` option disables the printing of code (only output is displayed).

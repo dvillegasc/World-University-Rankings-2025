@@ -2,9 +2,11 @@
 
 library(tidyverse)
 
+
 #Carga de datos
 df <- World_University_Rankings_2025
 df
+
 
 #Inspección de la base de datos
 str(df)
@@ -26,7 +28,7 @@ df <- df %>%
          International_Outlook = `International_Outlook`,
          About_university= `About_university`,
          About_university2= `About_university2`)
-
+colnames(df)
 
 #Tratamiento de la base de datos
 datos <- df %>%
@@ -89,4 +91,24 @@ datos <- datos%>%
       Overall >= 50 ~ "Medio (50-59.9)",
       Overall >= 40 ~ "Malo (40-49.9)",
       Overall < 40 ~  "Muy bajo (40-)"))
+
+# Variables numericas
+
+datos$Teaching              <- as.numeric(datos$Teaching)
+datos$Research_Environment  <- as.numeric(datos$Research_Environment) 
+datos$Research_Quality      <- as.numeric(datos$Research_Quality)
+datos$Industry              <- as.numeric(datos$Industry)
+datos$International_Outlook <- as.numeric(datos$International_Outlook)
+
+numeric_cols <- select_if(datos, is.numeric)
+
+
+print(numeric_cols)
+
+
+#ANÁLISIS ESTADISTICO
+
+
+
+
 
