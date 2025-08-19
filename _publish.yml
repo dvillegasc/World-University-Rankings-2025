@@ -1,0 +1,4 @@
+- source: Informe_Lux.qmd
+  quarto-pub:
+    - id: 81e74374-5f89-4a18-bfcc-5d8905cb78ea
+      url: https://david-villegas1.quarto.pub/-analisis-estadistico-de-la-base-de-datos-de-world-ranking-universities-2025

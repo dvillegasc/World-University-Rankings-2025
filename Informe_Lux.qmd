@@ -1,0 +1,553 @@
+---
+title: "Análisis estadístico de la base de datos de World Ranking Universities 2025"
+author: "David Villegas Ceballos"
+date: "today"
+lang: es
+theme: lux  
+format:
+  html:
+    theme: lux   
+    toc: true 
+    toc-depth: 3 
+    toc-location: left 
+    toc-title: "Índice"
+    number-sections: true 
+    smooth-scroll: true 
+    df-print: kable 
+editor: visual
+bibliography: referencias.bib
+---
+
+## Introducción
+
+La clasificación mundial de universidades se ha convertido en una herramienta de referencia para estudiantes, académicos y gobiernos, al ofrecer una panorámica del rendimiento y prestigio de la educación superior a nivel global. El ranking *World University Rankings 2025* proporciona una evaluación multidimensional basada en métricas clave como la enseñanza, el entorno y la calidad de la investigación, la colaboración con la industria y la perspectiva internacional. Comprender la dinámica de estos datos no solo permite identificar a las instituciones líderes, sino también analizar las fortalezas y debilidades de los sistemas educativos a nivel nacional y regional.
+
+Este informe presenta un análisis estadístico exhaustivo de dicho ranking con un triple objetivo: primero, realizar una exploración descriptiva para comprender la distribución y las características generales de las universidades a nivel mundial; segundo, llevar a cabo un análisis comparativo para identificar las variables que más influyen en el éxito de una institución; y tercero, aplicar estos análisis a un contexto local, examinando el posicionamiento de las universidades colombianas y, en particular, el de la Universidad de Antioquia.
+
+A través de la limpieza de datos, la visualización y el análisis de correlaciones, este estudio busca desvelar los patrones que definen la excelencia académica en el siglo XXI y ofrecer una perspectiva informada sobre el panorama de la educación superior en Colombia frente al escenario internacional.
+
+## Preparación de Datos
+
+```{r}
+#| include: false
+library(readxl)
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(corrplot)
+library(tidyr)
+library(kableExtra)
+library(knitr)
+```
+
+```{r include = FALSE}
+knitr:: opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+rmarkdown::html_document(df_print = knitr::kable)
+
+
+df <- read_excel("World University Rankings 2025.xlsx")
+```
+
+### Librerias
+
+-   `readxl`, `tidyverse`, `dplyr`, `tidyr` para la manipulación de datos.
+-   `ggplot2` `corrplot` para la creación de gráficos.
+-   `knitr` `kableExtra` para la estilización de tablas.
+
+### Inspección de la base de datos
+
+Encontramos que todas nuestras variables son categoricas, con **`r nrow(df)`** filas y **`r ncol(df)`** columnas.
+
+```{r}
+
+tibble(
+  Variable = names(df),
+  `Tipo de Dato` = sapply(df, class)
+) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed")) %>%
+  scroll_box(height = "400px")
+
+head(df) %>%
+  kable(caption = "Vista Previa de los Datos") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
+  scroll_box(width = "100%")
+
+```
+
+### Renombramiento de las variables
+
+```{r}
+df <- df %>%
+  rename(Rank = `Rank`, 
+         University = `University Name`,
+         Country = `CountryRegion`,
+         Overall = `Overall`,
+         Teaching = `Teaching`,
+         Research_Environment = `Research_Environment`, 
+         Research_Quality = `Research_Quality`,  
+         Industry = `Industry`,
+         International_Outlook = `International_Outlook`,
+         About_university= `About_university`,
+         About_university2= `About_university2`)
+
+kable(colnames(df), col.names = "Nombre de Variable", caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "bordered"))
+
+```
+
+### Operaciones de limpieza
+
+```{r}
+datos <- df %>%
+  filter(!is.na(University)) %>% #Filtramos los datos que no tengan nulos en la columna University
+  filter(!is.na(Country))    %>% #Filtramos los datos que no tengan nulos en la columna Country
+  filter(Rank != "Reporter") %>% #Filtramos los datos para que todos los Reporter desaparezcan
+  
+  select(-c(About_university,About_university2)) %>% #Eliminamos las columnas "About_university"
+  
+  mutate(Rank = str_replace(Rank, "=","")) %>% #Eliminamos el =
+  mutate(Rank = str_replace(Rank, "\\+", ""))  #Eliminamos el +
+```
+
+Con el objetivo de preparar la base de datos para el análisis estadístico, se aplicaron varias acciones de limpieza. Primero, se eliminaron todas las filas que no contenían el nombre de la universidad, pais o cuyo ranking era "Reporter", ya que no aportan valor al análisis. A continuación, se estandarizó la columna Rank eliminando los caracteres especiales como + y =. Finalmente, se descartaron las columnas About_university 1 y 2 por no ser relevantes para un análisis estadístico. Este proceso garantiza un conjunto de datos limpio y consistente para los siguientes pasos. Con esos cambios, quedamos con `r nrow(datos)` filas y `r ncol(datos)` columnas.
+
+> Nota: Al revisar la base de datos se encontró un dato el cual tenia el nombre de la universidad y el resto de datos, a excepcion del país. Debido a que tenia el link para sacar esa informacion faltante, la puse manualmente en la base de datos para evitar perder datos.
+
+```{r}
+#Tuve que poner el codigo antes, debido a que no me estaba copilando unas partes de codigo que usaban la nueva base de datos llamada **datos**
+
+head(datos) %>%
+  kable(caption = "Datos Limpios") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+```
+
+Las columnas Rank y Overall presentaban un formato mixto de texto, incluyendo tanto números individuales como rangos (ej: "55.1–58.2"), lo que impedía su uso en análisis estadísticos. Para solucionar esto, se transformaron todos los valores a un formato numérico. Los rangos fueron reemplazados por su punto medio, mientras que los números únicos se mantuvieron. Como resultado, ambas columnas ahora contienen datos puramente numéricos, listos para ser analizados.
+
+```{r}
+datos <- datos %>%
+  separate(Rank, c("MinRank", "MaxRank"), sep = "–", remove = F)  %>% #Separo Rank en Min y Max
+  separate(Overall, c("MinOverall", "MaxOverall"), sep = "–", remove = F)
+
+datos$MinRank <- as.numeric(datos$MinRank) #Los convierto en numericos
+datos$MaxRank <- as.numeric(datos$MaxRank)
+
+datos$MinOverall <- as.numeric(datos$MinOverall) 
+datos$MaxOverall <- as.numeric(datos$MaxOverall)
+
+
+datos <- datos %>%
+  mutate(Rank= if_else(is.na(MaxRank), MinRank, (MaxRank+MinRank)/2)) %>% #Aplico un if para dejar el Min o hacer promedio
+  select(-c(MinRank, MaxRank)) %>% #Elimino las columnas una vez usadas
+  
+  mutate(Overall= if_else(is.na(MaxOverall), MinOverall, (MaxOverall+MinOverall)/2)) %>%
+  select(-c(MinOverall, MaxOverall))
+
+RankOverall <- datos %>%
+  select(Rank, Overall)
+
+tibble(
+  Variable = names(RankOverall) ,
+  `Tipo de Dato` = sapply(RankOverall, class)) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+
+```
+
+#### Nota Adicional sobre los Datos Excluidos
+
+> Durante el proceso de limpieza, se eliminaron las filas que no contenían información en las columnas de `University` o `Country`. Una investigación en la página web oficial de la clasificación permitió identificar el origen de estos registros.
+
+> Se constató que estas entradas corresponden a instituciones de la **Federación Rusa**. En la web oficial, estas universidades aparecen listadas pero visualmente diferenciadas (en un tono grisáceo), lo que indica que no forman parte del ranking principal. Si bien la fuente no especifica la razón de este tratamiento, se infiere que esta exclusión podría estar relacionada con el actual contexto geopolítico.
+
+### Variables categoricas
+
+Tras la limpieza, se generaron dos nuevas variables categóricas, Rank_category y Overall_category, para facilitar el análisis por segmentos. La creación de Rank_category fue un paso fundamental, ya que el ranking numérico no es apto para cálculos directos. Por otro lado, la variable Overall_category se creó como un complemento a la columna Overall numérica, la cual se conserva para análisis cuantitativos precisos. Esto nos proporciona flexibilidad, permitiendo tanto comparaciones entre grupos de rendimiento como cálculos estadísticos detallados.
+
+```{r echo=TRUE}
+datos <- datos%>%
+  mutate(Rank_category= case_when(
+    Rank <= 10   ~ "1-10",
+    Rank <= 20   ~ "11-20",
+    Rank <= 30   ~ "21-30",
+    Rank <= 40   ~ "31-40",
+    Rank <= 50   ~ "41-50",
+    Rank <= 100  ~ "51-100",
+    Rank <= 500  ~ "101-500",
+    Rank <= 1000 ~ "501-1000",
+    Rank <= 1500 ~ "1001-1500",
+    Rank > 1500  ~ "1500+"),
+    
+    Overall_category= case_when(
+      Overall >= 90 ~ "Excelente (90+)",
+      Overall >= 80 ~ "Muy alto (80-89.9)",
+      Overall >= 70 ~ "Alto (70-79.9)",
+      Overall >= 60 ~ "Bueno (60-69.9)",
+      Overall >= 50 ~ "Medio (50-59.9)",
+      Overall >= 40 ~ "Bajo (40-49.9)",
+      Overall < 40 ~  "Muy bajo (40-)"))
+```
+
+### Variables númericas
+
+```{r}
+datos$Teaching              <- as.numeric(datos$Teaching)
+datos$Research_Environment  <- as.numeric(datos$Research_Environment) 
+datos$Research_Quality      <- as.numeric(datos$Research_Quality)
+datos$Industry              <- as.numeric(datos$Industry)
+datos$International_Outlook <- as.numeric(datos$International_Outlook)
+
+numeric_cols <- select_if(datos, is.numeric)
+
+
+head(colnames(numeric_cols), 10) %>%
+  kable(col.names = "Nombre de variables numericas") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+
+```
+
+### Variables
+
+Ya que están limpios nuestros datos, realizamos una identificación de las variables con las que quedamos, para así poder proseguir con nuestro análisis estadístico.
+
+| Variable              | Tipo         |
+|-----------------------|--------------|
+| Rank                  | Cuantitativa |
+| University            | Cualitativa  |
+| Country               | Cualitativa  |
+| Overall               | Cuantitativa |
+| Teaching              | Cuantitativa |
+| Research_Environment  | Cuantitativa |
+| Research_Quality      | Cuantitativa |
+| Industry              | Cuantitativa |
+| International_Outlook | Cuantitativa |
+| Rank_category         | Cualitativa  |
+| Overall_category      | Cualitativa  |
+
+## Análisis estadistico
+
+Para realizar este análisis, lo que se hizo, fue plantear varias preguntas por secciones para poder responderlas con los datos que tenemos, ya que la base de datos está limpia, y esto nos permite tener un gran alcance
+
+### Preguntas para el análisis
+
+### Análisis descriptivo
+
+-   ¿Cuántas universidades hay en cada Overall_category?
+
+-   ¿La mayoría de las universidades se concentran en los rangos más bajos o más altos?
+
+-   ¿Como se distribuye cada una de las métricas clave (Teaching, Research_Environment, Research_Quality, Industry, International_Outlook) en todo el conjunto de datos?
+
+Solo una pequeña parte del total de las universidades se posiciona en los primeros puestos del ranking; la mayor parte se encuentra con un Overall menor a 40. Además, vemos que hay un claro comportamiento que va decayendo desde las categorías bajas hasta las categorías altas.
+
+```{r}
+
+ConteoOverall <- datos %>%
+  count(Overall_category, sort= TRUE)
+
+kable(ConteoOverall, caption = "Conteo de universidades") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F)
+
+```
+
+El histograma de la puntuación Overall revela que la mayor concentración de universidades se encuentra en el rango de puntajes medios-bajos, con una frecuencia que disminuye progresivamente a medida que el puntaje aumenta, observándose además que no hay ninguna universidad con un Overall menor a 10. Esto indica que, si bien muchas instituciones alcanzan un nivel de rendimiento competitivo, la verdadera excelencia (puntajes de 80 o más) es un logro mucho más exclusivo y menos frecuente en el panorama global.
+
+```{r}
+ggplot(datos, aes(x = Overall)) +
+  geom_histogram(binwidth = 5, fill = "#56B4E9", color = "black") +
+  labs(title = "Distribución de la Puntuación Overall",
+       x = "Puntuación Overall",
+       y = "Número de Universidades") +
+  theme_minimal()
+```
+
+En el boxplot identificamos una fuerte conexión entre Enseñanza y Ambiente de Investigación; las variables Teaching y Research_Environment muestran distribuciones casi idénticas en sus diagramas, con la mayoría de las universidades agrupadas en puntajes bajos y un grupo con puntajes muy altos. Esta similitud se confirma con una correlación muy alta (0.86), lo que sugiere que ambas crecen de forma conjunta.
+
+```{r}
+#| include: false
+cor(datos$Teaching, datos$Research_Environment)
+```
+
+```{r}
+
+par(mfrow= c(1,2))
+
+boxplot(datos$Teaching, main= "Teaching", col= "#56B4E9")
+boxplot(datos$Research_Environment, main= "Research Environment", col="#56B4E9")
+
+
+
+par(mfrow= c(1,1))
+
+```
+
+El análisis de los boxplots revela distribuciones muy distintas. La Calidad de la Investigación (Research Quality) se muestra como la más equilibrada, con una distribución simétrica que sugiere una competencia generalizada entre las universidades. En marcado contraste, la Perspectiva Internacional (International Outlook) y, sobre todo, la Industria (Industry), presentan una gran parte de valores bajos. Esto indica que la excelencia en la internacionalización y, de manera más exclusiva, en la colaboración industrial, no son la norma, sino los verdaderos factores diferenciadores que distinguen a la élite universitaria del resto de instituciones del ranking.
+
+```{r}
+par(mfrow= c(1,3))
+boxplot(datos$Research_Quality, main= "Research Quality", col= "#56B4E9")
+boxplot(datos$Industry, main= "Industry", col= "#56B4E9")
+boxplot(datos$International_Outlook, main= "International Outlook", col= "#56B4E9")
+par(mfrow= c(1,1))
+```
+
+### Análisis comparativo y de relaciones
+
+-   ¿Cómo cambian las métricas promedio (Teaching, Industry, etc.) a medida que descendemos en la Overall_category?
+-   ¿Cuál es el perfil de una universidad "Excelente (90+)" vs. una "Buena (60-69.9)"?
+-   ¿La perspectiva internacional (International_Outlook) es significativamente más alta en las categorías superiores?
+-   ¿Qué métricas tienen la correlación más fuerte con el puntaje Overall? (Una matriz de correlación es perfecta para esto).
+-   ¿Existe una relación visible entre los ingresos de la industria (Industry) y la calidad de la investigación (Research_Quality)? (Un gráfico de dispersión te ayudará a verlo).
+
+En nuestro análisis, encontramos que, para competir a nivel global, la Perspectiva Internacional es el requisito mínimo. Si bien muchas instituciones logran una alta calidad de investigación y fuertes lazos con la industria, el factor que verdaderamente define a las universidades top es la abrumadora superioridad de su ambiente de investigación. Este ecosistema integral de financiación, infraestructura y concentración de talento es la barrera definitiva que explica por qué la cima del ranking está reservada para un grupo tan exclusivo de universidades.
+
+```{r}
+
+OvCategory <- datos %>%
+  group_by(Overall_category) %>%
+  summarise(
+    N_Universidades = n(),
+    Teaching_Avg = mean(Teaching, na.rm = TRUE),
+    Research_Env_Avg = mean(Research_Environment, na.rm = TRUE),
+    Research_Quality_Avg = mean(Research_Quality, na.rm = TRUE),
+    Industry_Avg = mean(Industry, na.rm = TRUE),
+    International_Avg = mean(International_Outlook, na.rm = TRUE)
+  ) %>%
+  arrange(desc(Teaching_Avg)) # Ordenamos
+
+OvCategory %>%
+  kable(caption = "Perfil Promedio por Categoría Overall", digits = 1) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
+  scroll_box(width = "100%")
+```
+
+Para entender la relación entre las distintas métricas, se generó una matriz de correlación. El análisis de correlación revela que la puntuación Overall está predominantemente determinada por el rendimiento en investigación. Específicamente, el ambiente de investigación (Research_Environment) y la calidad de la investigación (Research_Quality) son los predictores más fuertes del éxito en el ranking, con correlaciones de 0.90 y 0.87 respectivamente. La Enseñanza (Teaching) también es un pilar fundamental (0.82).
+
+Por otro lado, la perspectiva internacional (International_Outlook) emerge como un factor más independiente, con correlaciones más débiles con las otras métricas, sugiriendo que requiere estrategias diferentes para aumentar su puntaje. Finalmente, la fuerte sinergia entre el ambiente de investigación (Research_Environment) y la enseñanza (Teaching) (0.86) subraya que un entorno de investigación saludable es un motor clave para la calidad docente.
+
+```{r}
+
+numeric_datos <- datos %>%
+  select(Overall,Teaching,Research_Environment,Research_Quality,Industry, International_Outlook)
+
+
+cor_matrix <- cor(numeric_datos)
+  
+corrplot(cor_matrix, method = "number", col = blues9, tl.col = "black")
+```
+
+El gráfico de dispersión muestra una relación positiva, aunque moderada, entre la industria y la calidad de la investigación. Si bien hay una tendencia a que las universidades con alta calidad de investigación también tengan buenos puntajes en industria, la dispersión de los puntos indica que esta no es una relación absoluta.
+
+```{r}
+ggplot(datos, aes(x = Industry, y = Research_Quality)) +
+  geom_point(alpha = 0.5, color = "#56B4E9") +
+  geom_smooth(method = "lm", color = "black", se = FALSE) +
+  labs(title = "Relación entre Industria y Calidad de Investigación",
+       x = "Puntaje de Industria",
+       y = "Puntaje de Calidad de Investigación") +
+  theme_minimal()
+```
+
+### Análisis por paises
+
+#### Internacional
+
+-   ¿Qué países tienen la mayor cantidad de universidades en la categoría "Excelente (90+)" o Muy alto (80-89.9)"?
+
+El prestigio académico global está fuertemente concentrado en Estados Unidos, con el Reino Unido como segundo. El resto de los países, aunque importantes, juegan un papel mucho menor en términos de cantidad de instituciones de primer nivel.
+
+```{r}
+U_top <- datos %>%
+  filter(Overall_category == "Excelente (90+)" | Overall_category == "Muy alto (80-89.9)")
+  
+tabla_paises <- U_top %>%
+  count(Country, sort = TRUE)
+  
+kable(tabla_paises, caption = "Top 10 Países con las mejores Universidades") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+
+```
+
+#### Colombia
+
+-   ¿Cuántas universidades colombianas aparecen en el ranking y cuales son las mejores 10?
+
+-   ¿Cuál es el puntaje promedio de Colombia en cada una de las métricas, y según estos, cuales son las fortalezas y debilidades del país?
+
+-   Al comparar los promedios de Colombia con el promedio global, ¿en qué áreas destacan las universidades colombianas y en cuáles tienen una brecha por cerrar?
+
+En Colombia, en total aparecen 23 universidades en este ranking, en nuestro top 10 podemos destacar que aparecen 4 universidades que tienen sede en medellin, entre estas esta nuestra queridisima UdeA, la cual se encuentra en el quinto lugar.
+
+```{r}
+U_col <- datos %>%
+  filter(Country == "Colombia")
+
+kable(count(U_col))
+
+kable(U_col$University, caption = "Universidades de Colombia en el ranking") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+Las universidades colombianas han logrado construir un buen perfil internacional, lo que les permite competir en el escenario global. Sin embargo, la inversión y el soporte al entorno de investigación representan su área más vulnerable. La calidad de la enseñanza también presenta una oportunidad de mejora significativa. Las universidades demuestran una notable eficiencia al producir investigación de calidad a pesar de las limitaciones de su entorno. Esto podría mejorar con una mayor inversión en infraestructura y recursos para la investigación.
+
+```{r}
+
+AvgCol <- U_col %>%
+  summarise(
+    N_Universidades = n(),
+    Overall_Avg = mean(Overall, na.rm = TRUE),
+    Teaching_Avg = mean(Teaching, na.rm = TRUE),
+    Research_Env_Avg = mean(Research_Environment, na.rm = TRUE),
+    Research_Quality_Avg = mean(Research_Quality, na.rm = TRUE),
+    Industry_Avg = mean(Industry, na.rm = TRUE),
+    International_Avg = mean(International_Outlook, na.rm = TRUE)
+  ) %>%
+  arrange(desc(Teaching_Avg)) # Ordenamos
+
+AvgCol %>%
+  kable(caption = "Perfil Promedio por variable de Colombia", digits = 1) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = F) %>%
+  scroll_box(width = "100%")
+```
+
+Las universidades colombianas han logrado posicionarse en el escenario mundial gracias a una fuerte estrategia de internacionalización, siendo esta su área de mayor competitividad. Sin embargo, para escalar posiciones de manera significativa, es necesario abordar las profundas brechas en su entorno de investigación, tanto en recursos como en impacto. Fortalecer la colaboración con la industria y mejorar el entorno de la enseñanza son los siguientes pasos para construir un sistema de educación superior más robusto y competitivo a nivel global.
+
+```{r}
+
+GlobalAvg <- datos %>%
+  summarise(
+    N_Universidades = n(),
+    Overall_Avg = mean(Overall, na.rm = TRUE),
+    Teaching_Avg = mean(Teaching, na.rm = TRUE),
+    Research_Env_Avg = mean(Research_Environment, na.rm = TRUE),
+    Research_Quality_Avg = mean(Research_Quality, na.rm = TRUE),
+    Industry_Avg = mean(Industry, na.rm = TRUE),
+    International_Avg = mean(International_Outlook, na.rm = TRUE)
+  ) %>%
+  arrange(desc(Teaching_Avg)) # Ordenamos
+
+
+
+```
+
+```{r}
+
+AvgCol$Grupo <- "Promedio Colombia"
+GlobalAvg$Grupo <- "Promedio Global"
+
+tidy_comparison <- bind_rows(AvgCol, GlobalAvg) %>%
+  tidyr::pivot_longer(
+    cols = -Grupo,
+    names_to = "Metrica",
+    values_to = "Puntaje"
+  ) %>%
+  dplyr::filter(Metrica != "N_Universidades") %>%
+  dplyr::mutate(Metrica = gsub("_Avg", "", Metrica))
+
+ggplot(tidy_comparison, aes(x = Metrica, y = Puntaje, fill = Grupo)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(
+    aes(label = round(Puntaje, 1)),
+    position = position_dodge(width = 0.9),
+    vjust = -0.5,
+    size = 3.5
+  ) +
+  labs(
+    title = "Promedio Colombia vs. Promedio Global",
+    subtitle = "Comparación de rendimiento en las métricas clave del ranking",
+    x = "Área de Evaluación",
+    y = "Puntaje Promedio (0-100)",
+    fill = "Grupo de Comparación"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10)) +
+  ylim(0, 65)
+
+```
+
+### Universidad de Antioquia
+
+Posicionamiento de la Universidad de Antioquia:
+
+-   ¿En qué métrica obtiene su mejor puntaje en comparación con las otras universidades de Colombia?
+
+-   ¿En qué Rank_category y Overall_category se encuentra la Universidad de Antioquia?
+
+-   ¿Cuál es su puntaje más bajo en comparación con las líderes nacionales?
+
+-   ¿Cuales son las metricas de la UdeA, respecto a las metricas promedio de las universidades de Colombia?
+
+La Universidad de Antioquia está bien posicionada en Colombia, y su éxito tiene una razón. Su gran fortaleza radica en la colaboración con la industria y en la calidad de su investigación, áreas donde supera con gran ventaja al resto del país y que explican por qué tiene una mejor calificación general. Sin embargo, en enseñanza tiene un puntaje muy parecido al promedio nacional, y en el aspecto internacional está un poco por debajo. Esto nos dice que la UdeA brilla especialmente por su capacidad de generar conocimiento útil y práctico, siendo este su verdadero sello distintivo, más que por destacar en todas las áreas por igual.
+
+```{r}
+
+Udea <- datos%>%
+  filter(University== "University of Antioquia")
+
+AvgUdea <- Udea %>%
+  summarise(
+    N_Universidades = n(),
+    Overall_Avg = mean(Overall, na.rm = TRUE),
+    Teaching_Avg = mean(Teaching, na.rm = TRUE),
+    Research_Env_Avg = mean(Research_Environment, na.rm = TRUE),
+    Research_Quality_Avg = mean(Research_Quality, na.rm = TRUE),
+    Industry_Avg = mean(Industry, na.rm = TRUE),
+    International_Avg = mean(International_Outlook, na.rm = TRUE)
+  ) %>%
+  arrange(desc(Teaching_Avg)) # Ordenamos
+
+```
+
+```{r}
+
+AvgUdea$Grupo <- "Promedio UdeA"
+AvgCol$Grupo <- "Promedio Colombia"
+
+tidy_comparison <- bind_rows(AvgUdea, AvgCol) %>%
+  tidyr::pivot_longer(
+    cols = -Grupo,
+    names_to = "Metrica",
+    values_to = "Puntaje"
+  ) %>%
+  dplyr::filter(Metrica != "N_Universidades") %>%
+  dplyr::mutate(Metrica = gsub("_Avg", "", Metrica))
+
+ggplot(tidy_comparison, aes(x = Metrica, y = Puntaje, fill = Grupo)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(
+    aes(label = round(Puntaje, 1)),
+    position = position_dodge(width = 0.9),
+    vjust = -0.5,
+    size = 3.5
+  ) +
+  labs(
+    title = "Promedio UdeA vs. Promedio nacional",
+    subtitle = "Comparación de rendimiento en las métricas clave del ranking",
+    x = "Área de Evaluación",
+    y = "Puntaje Promedio (0-100)",
+    fill = "Grupo de Comparación"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10)) +
+  ylim(0, 65)
+
+```
+
+## Conclusiones
+
+Este análisis estadístico del *World University Rankings 2025* ha permitido extraer conclusiones significativas sobre la estructura de la excelencia en la educación superior a nivel global y local.
+
+1.  **La excelencia es exclusiva y se basa en la investigación:** A nivel mundial, el éxito en el ranking no se distribuye de manera uniforme. La gran mayoría de las universidades se concentran en los rangos medios y bajos de la clasificación. El factor diferenciador clave para alcanzar la élite académica es un **ecosistema de investigación robusto**, como lo demuestran las altas correlaciones (superiores a 0.85) entre el puntaje `Overall` y las métricas de `Research_Environment` y `Research_Quality`.
+
+2.  **Estados Unidos y el Reino Unido dominan la cima:** El liderazgo académico global es dominado por Estados Unidos, seguido por el Reino Unido, dado que albergan la mayor cantidad de instituciones en las categorías más altas del ranking, estableciendo un estándar de rendimiento difícil de igualar para otras instituciones.
+
+3.  **Colombia: fuerte en internacionalización, débil en entorno de investigación:** Las universidades colombianas han logrado competividad en el ranking global gracias a una notable fortaleza en su Perspectiva Internacional, superando incluso el promedio mundial en esta métrica. Sin embargo, la principal área de mejora y la mayor brecha con el promedio global reside en el Entorno de Investigación, lo que sugiere que la falta de inversión y recursos en este campo es el principal obstáculo para escalar posiciones.
+
+4.  **La Universidad de Antioquia: Un referente nacional impulsado por la industria y la calidad investigativa:** La UdeA se destaca en el contexto colombiano no por seguir el patrón nacional, sino por sus fortalezas distintivas. Su liderazgo se fundamenta en una calidad de investigación y una conexión con la industria significativamente superiores al promedio nacional. Esto indica un modelo de éxito basado en la generación de conocimiento aplicado y relevante, consolidándola como un referente en el país.
+
+En síntesis, mientras que la internacionalización es la puerta de entrada al escenario global para las universidades colombianas, el camino hacia la excelencia sostenida requiere una inversión estratégica y decidida en el fortalecimiento de sus ecosistemas de investigación.
+
+## Referencias
+
+[@tidyverse;@tidyr; @ggplot2; @dplyr; @corrplot; @kableExtra; @knitr;[@readxl]\]

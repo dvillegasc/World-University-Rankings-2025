@@ -1,6 +1,9 @@
 #Librerias
 
 library(tidyverse)
+library(corrplot)
+library(ggplot2)
+library(dplyr)
 
 
 #Carga de datos
@@ -33,6 +36,7 @@ colnames(df)
 #Tratamiento de la base de datos
 datos <- df %>%
   filter(!is.na(University)) %>% #Filtramos los datos que no tengan nulos en la columna University
+  filter(!is.na(Country))    %>% #Filtramos los datos que no tengan nulos en la columna Country
   filter(Rank != "Reporter") %>% #Filtramos los datos para que todos los Reporter desaparezcan
   
   select(-c(About_university,About_university2)) %>% #Eliminamos las columnas "About_university"
@@ -63,8 +67,6 @@ datos <- datos %>%
   mutate(Overall= if_else(is.na(MaxOverall), MinOverall, (MaxOverall+MinOverall)/2)) %>%
   select(-c(MinOverall, MaxOverall))
 
-datos
-
 glimpse(datos)
 
 
@@ -84,12 +86,12 @@ datos <- datos%>%
     Rank > 1500 ~ "Top 1500+"),
     
     Overall_category= case_when(
-      Overall >= 90 ~ "Élite (90+)",
-      Overall >= 80 ~ "Excelente (80-89.9)",
+      Overall >= 90 ~ "Excelente (90+)",
+      Overall >= 80 ~ "Muy alto (80-89.9)",
       Overall >= 70 ~ "Alto (70-79.9)",
       Overall >= 60 ~ "Bueno (60-69.9)",
       Overall >= 50 ~ "Medio (50-59.9)",
-      Overall >= 40 ~ "Malo (40-49.9)",
+      Overall >= 40 ~ "Bajo (40-49.9)",
       Overall < 40 ~  "Muy bajo (40-)"))
 
 # Variables numericas
@@ -105,10 +107,64 @@ numeric_cols <- select_if(datos, is.numeric)
 
 print(numeric_cols)
 
+################################################################################
 
 #ANÁLISIS ESTADISTICO
 
 
+Table_category <- table(datos$Rank_category)        
+barplot(Table_category,                   
+        main="Rank Category",              
+        xlab="Rank",                  
+        ylab="Categorias",                   
+        legend = rownames(Table_category),    
+        ylim = c(0, 1500),
+        xlim = c(0, 15))  
 
 
+
+#Boxplot teaching y Reasearch_Enviroment
+cor(datos$Teaching, datos$Research_Environment)
+
+par(mfrow= c(1,2))
+boxplot(datos$Teaching, main= "Teaching")
+boxplot(datos$Research_Environment, main= "Research Environment")
+par(mfrow= c(1,1))
+
+
+#Boxplot Industry, International_Outlook y Research_Quality
+par(mfrow= c(1,3))
+boxplot(datos$Research_Quality, main= "Research Quality")
+boxplot(datos$Industry, main= "Industry")
+boxplot(datos$International_Outlook, main= "International Outlook")
+par(mfrow= c(1,1))
+
+
+#Segunda parte
+OvCategory <- datos %>%
+  group_by(Overall_category) %>%
+  summarise(
+    N_Universidades = n(),
+    Teaching_Avg = mean(Teaching, na.rm = TRUE),
+    Research_Env_Avg = mean(Research_Environment, na.rm = TRUE),
+    Research_Quality_Avg = mean(Research_Quality, na.rm = TRUE),
+    Industry_Avg = mean(Industry, na.rm = TRUE),
+    International_Avg = mean(International_Outlook, na.rm = TRUE)
+  ) %>%
+  arrange(desc(Teaching_Avg)) # Ordenamos
+
+print(OvCategory[,c(1,2,3,4)])
+print(OvCategory[,c(5,6,7)])
+
+
+
+
+numeric_datos <- datos %>%
+  select(Overall,Teaching,Research_Environment,Research_Quality,Industry, International_Outlook)
+
+
+cor_matrix <- cor(numeric_datos)
+corrplot(cor_matrix, method = "number")
+
+#Mejor decidí seguir haciendo las graficas en Quarto ✌
 
